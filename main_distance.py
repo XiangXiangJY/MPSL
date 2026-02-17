@@ -12,7 +12,7 @@ Y_PATH = os.path.join(IN_ROOT, "y.npy")
 OUT_ROOT = "/mnt/gs21/scratch/wangx306/project3/results/global_dist"
 OUT_DIR = os.path.join(OUT_ROOT, DATA_NAME)
 
-PCA_DIMS = [900, 800,700, 600]
+PCA_DIMS = [1000,900, 800,700, 600,500,400,300,200]
 PCA_RANDOM_STATE = 1
 METRIC = "euclidean"
 WHITEN = False
@@ -118,4 +118,5 @@ def main():
 
 
 if __name__ == "__main__":
+
     main()

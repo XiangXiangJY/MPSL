@@ -38,8 +38,14 @@ This implementation includes scripts for:
 - `environment.yml`  
   Conda environment configuration.
 
-- `sheaf_math.py`, `psl_utilsA_corrected.py`, `main_coil0_corrected.py`  
-  Corrected restriction-map construction — see "Restriction-Map Correction" below.
+- `sheaf_math.py`  
+  Corrected restriction-map math (composition-axiom fix) — see "Restriction-Map Correction" below.
+
+- `psl_utilsA_corrected.py`  
+  Drop-in corrected replacement for `psl_utilsA.py::compute_psl_eigs`, built on `sheaf_math.py`.
+
+- `main_coil0_corrected.py`  
+  Per-center PSL feature driver using the corrected restriction map (the corrected counterpart of the original, unpublished `main_coil0.py`).
 
 ---
 
@@ -96,6 +102,71 @@ cache produced by `main_distance.py` and writing to a separate
 `psl_eigs_corrected/` output root so it never overwrites features computed
 with the original restriction map. `main_merge.py` and
 `main_multiclassknnCOIL20M.py` work unchanged against the corrected output —
-just point them at the `psl_eigs_corrected/` root (and set
-`DATASET = "COIL20"` at the top of `main_merge.py`, which currently defaults
-to `"ETH80"`).
+they just need to be pointed at that root (see the step-by-step guide below).
+
+### How to compute the corrected features, step by step
+
+All scripts in this repo are configured by editing the constants near the
+top of the file, not by command-line flags — edit, save, then run
+`python <script>.py`. This is the exact sequence for COIL20:
+
+1. **Get the raw images.**
+   ```bash
+   python download_coil.py
+   ```
+   Downloads/extracts COIL20 (and COIL100) under `DATA_ROOT` (edit that
+   constant at the top of the file if you want a different location).
+
+2. **Build `X.npy`/`y.npy` from the raw images.**
+   In `readcoil.py`, set `DATASET = "coil20"` (the file currently defaults to
+   `"coil120"`, which is not a valid key in `DATASET_CONFIG` — a pre-existing
+   typo, unrelated to the restriction-map fix; you must correct it locally
+   before this step will run). Then:
+   ```bash
+   python readcoil.py
+   ```
+   Writes `X.npy`/`y.npy` to `.../coil20_vectors/` (path from
+   `DATASET_CONFIG["coil20"]["out_dir"]`).
+
+3. **Build the global PCA embedding + pairwise-distance cache.**
+   ```bash
+   python main_distance.py
+   ```
+   Reads `X.npy`/`y.npy` from step 2, writes `{tag}_X_pca.npy` /
+   `{tag}_D_global.npy` (one pair per `PCA_DIMS` entry) to
+   `.../global_dist/COIL20/`.
+
+4. **Compute corrected per-center PSL eigenvalues.**
+   ```bash
+   python main_coil0_corrected.py
+   ```
+   Reads the cache from step 3, writes one `center###_psl.npy` file per
+   image per `(pca_dim, k_local)` setting under
+   `.../psl_eigs_corrected/COIL20/pca{D}/k{K}/alpha0p0/`. With the default
+   `CHUNK = 20`, one run covers 20 centers (`SLURM_ARRAY_TASK_ID` unset ->
+   task 0 -> centers 0-19); to cover all 1440 COIL20 images either loop
+   locally (e.g. `for i in $(seq 0 71); do SLURM_ARRAY_TASK_ID=$i python
+   main_coil0_corrected.py; done`) or submit as a SLURM array
+   (`--array=0-71`). Edit `PCA_DIMS` / `K_LOCAL_LIST` at the top of the file
+   to control which settings get computed.
+
+5. **Merge per-center files into one array per setting.**
+   In `main_merge.py`, set `DATASET = "COIL20"` (it currently defaults to
+   `"ETH80"`) and `METHOD_DIR = "psl_eigs_corrected"` (so it reads step 4's
+   output instead of the original construction's). Then:
+   ```bash
+   python main_merge.py
+   ```
+
+6. **Run the k-NN classification experiment.**
+   In `main_multiclassknnCOIL20M.py`, set `METHOD_DIR = "psl_eigs_corrected"`
+   (same reasoning as step 5). Then:
+   ```bash
+   python main_multiclassknnCOIL20M.py
+   ```
+   Prints cross-validated accuracy/balanced-accuracy/macro-F1 and saves a
+   JSON summary under `OUT_DIR`.
+
+Steps 5-6 never touch the original `psl_eigs/` output, so you can compute
+both the original and corrected features and compare them by toggling
+`METHOD_DIR` between `"psl_eigs"` and `"psl_eigs_corrected"`.
